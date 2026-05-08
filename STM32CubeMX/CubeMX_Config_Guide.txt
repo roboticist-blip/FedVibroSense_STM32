@@ -1,0 +1,253 @@
+##############################################################################
+# STM32CubeMX Configuration Guide for FedVibroSense
+# File: STM32CubeMX/CubeMX_Config_Guide.txt
+#
+# This file specifies the EXACT STM32CubeMX settings required to generate
+# the base project that custom firmware files are copied into.
+#
+# After generating the CubeMX project:
+#   1. Copy all files from Core/Src/ and Core/Inc/ into the generated project
+#   2. DO NOT overwrite stm32f4xx_hal_msp.c or stm32f4xx_it.c from CubeMX
+#   3. Build with: make all  OR  arm-none-eabi-gcc per Makefile
+##############################################################################
+
+==============================================================================
+STEP 1: NEW PROJECT
+==============================================================================
+
+Board/Part:    STM32F405RGT6  (NOT a discovery/nucleo board selection)
+Project Name:  FedVibroSense
+Toolchain:     Makefile  (generates HAL sources, NOT IDE project files)
+STM32Cube FW:  STM32Cube FW_F4 V1.27+
+
+==============================================================================
+STEP 2: CLOCK CONFIGURATION (Pinout & Configuration → Clock Configuration)
+==============================================================================
+
+Input Frequency:    8 MHz  (HSE crystal on your PCB — adjust if different)
+PLL Source:         HSE
+PLLM:               8
+PLLN:               336
+PLLP:               2   (SYSCLK = 168 MHz)
+PLLQ:               7   (USB = 48 MHz)
+System Clock Mux:   PLLCLK
+AHB Prescaler:      1   (HCLK = 168 MHz)
+APB1 Prescaler:     4   (PCLK1 = 42 MHz, timer = 84 MHz)
+APB2 Prescaler:     2   (PCLK2 = 84 MHz, timer = 168 MHz)
+Flash Latency:      5 WS  (auto-set when SYSCLK = 168 MHz)
+
+==============================================================================
+STEP 3: SYS CONFIGURATION
+==============================================================================
+
+Debug:          Serial Wire (SWD)
+Timebase:       SysTick  (HAL timebase, 1 kHz tick)
+                NOTE: Do NOT use TIM2 or TIM3 as timebase — they are used
+                      by FedVibroSense firmware.
+
+==============================================================================
+STEP 4: FPU CONFIGURATION (Project Manager → Advanced Settings)
+==============================================================================
+
+FPU:            Enabled (check "Enable FPU" in Project Manager)
+Float ABI:      Hard  (-mfloat-abi=hard)
+FPU Type:       FPv4-SP-D16
+
+This is CRITICAL — the neural network forward pass runs ~6× faster with
+hardware FPU than software-emulated float.
+
+==============================================================================
+STEP 5: I2C1 CONFIGURATION (MPU-6050)
+==============================================================================
+
+Mode:           I2C
+Speed Mode:     Fast Mode (400 kHz)
+Clock Speed:    400000 Hz
+Duty Cycle:     2 (Fm mode duty cycle Tlow/Thigh = 2)
+Address Mode:   7-bit
+
+GPIO Pins (auto-assigned by CubeMX):
+  PB8  →  I2C1_SCL  (AF4, Open Drain, Pull-Up, High Speed)
+  PB9  →  I2C1_SDA  (AF4, Open Drain, Pull-Up, High Speed)
+
+NOTE: External 4.7 kΩ pull-up resistors required on SDA and SCL lines.
+      Do NOT rely solely on internal pull-ups at 400 kHz.
+
+DMA:            NOT required (polling mode sufficient at 100 Hz)
+Interrupts:     Disable I2C event/error interrupts (polling mode)
+
+==============================================================================
+STEP 6: USART2 CONFIGURATION (Debug UART)
+==============================================================================
+
+Mode:           Asynchronous
+Baud Rate:      115200
+Word Length:    8 Bits
+Stop Bits:      1
+Parity:         None
+Flow Control:   None
+Over Sampling:  16 Samples
+
+GPIO Pins:
+  PA2  →  USART2_TX  (AF7)
+  PA3  →  USART2_RX  (AF7)
+
+Interrupts:     Enable USART2 global interrupt (for label command RX)
+NVIC Priority:  3 (below TIM3, above default)
+
+DMA:            NOT required (blocking TX used for log output)
+
+==============================================================================
+STEP 7: USART1 CONFIGURATION (FL Communication UART)
+==============================================================================
+
+Mode:           Asynchronous
+Baud Rate:      921600  (high speed for 32 KB weight transfer)
+Word Length:    8 Bits
+Stop Bits:      1
+Parity:         None
+Flow Control:   None (add hardware flow control for noisy environments)
+Over Sampling:  16 Samples
+
+GPIO Pins:
+  PA9   →  USART1_TX  (AF7)
+  PA10  →  USART1_RX  (AF7)
+
+Interrupts:     Enable USART1 global interrupt
+NVIC Priority:  4
+
+NOTE: At 921600 baud, wire length should be < 1 m.
+      Use a USB-UART adapter with CP2102/CH340 on the server side.
+
+==============================================================================
+STEP 8: TIM2 CONFIGURATION (Microsecond Timer)
+==============================================================================
+
+Mode:           Internal Clock
+Prescaler:      83          (APB1 timer = 84 MHz → 84/84 = 1 MHz)
+Counter Mode:   Up
+Counter Period: 4294967295  (0xFFFFFFFF — full 32-bit range)
+Internal Clock Division: No Division
+Auto-Reload Preload: Disable
+
+DO NOT enable TIM2 interrupt — it's a pure free-running counter.
+Start it in code: HAL_TIM_Base_Start(&htim2)
+
+==============================================================================
+STEP 9: TIM3 CONFIGURATION (100 Hz Sampling Timer)
+==============================================================================
+
+Mode:           Internal Clock
+Prescaler:      839         (APB1 timer = 84 MHz → 84 MHz / 840 = 100 kHz)
+Counter Mode:   Up
+Counter Period: 999         (100 kHz / 1000 = 100 Hz)
+Internal Clock Division: No Division
+Auto-Reload Preload: Enable  (prevents missed interrupts during reload)
+
+Interrupts:
+  Enable TIM3 global interrupt
+  NVIC Priority: 1 (high priority — must not be delayed by UART)
+
+The TIM3 ISR (HAL_TIM_PeriodElapsedCallback) sets g_sample_flag = 1
+in main.c for 100 Hz IMU sampling.
+
+==============================================================================
+STEP 10: GPIO CONFIGURATION
+==============================================================================
+
+PA0   →  GPIO_EXTI0  (MPU-6050 INT pin)
+          Mode:   External Interrupt (falling edge)
+          Pull:   Pull-Up
+          NVIC:   EXTI0_IRQn priority 2
+          Label:  MPU_INT
+
+PC13  →  GPIO_EXTI13  (User Button, active low on Nucleo)
+          Mode:   External Interrupt (falling edge)
+          Pull:   No pull (button has external pull-up on Nucleo)
+          NVIC:   EXTI15_10_IRQn priority 3
+          Label:  USER_BTN
+
+PD12  →  GPIO_Output  (Green LED — Normal class)
+PD13  →  GPIO_Output  (Orange LED — Imbalance class)
+PD14  →  GPIO_Output  (Red LED — Looseness class)
+PD15  →  GPIO_Output  (Blue LED — Training/FL active)
+          All LEDs: Output PP, No pull, Low speed
+          Initial state: Reset (off)
+
+==============================================================================
+STEP 11: NVIC PRIORITY TABLE
+==============================================================================
+
+Priority  IRQ                   Purpose
+--------  ---                   -------
+0         SysTick               HAL tick (1 kHz)
+1         TIM3_IRQn             100 Hz IMU sampling
+2         EXTI0_IRQn            MPU-6050 data ready
+3         EXTI15_10_IRQn        User button (label)
+3         USART2_IRQn           Debug UART RX
+4         USART1_IRQn           FL UART
+5         I2C1_EV_IRQn          I2C events (if enabled)
+
+NOTE: Lower number = higher priority on ARM Cortex-M (preemption).
+      TIM3 at priority 1 ensures IMU sampling is never preempted by UART.
+
+==============================================================================
+STEP 12: CODE GENERATOR SETTINGS (Project Manager → Code Generator)
+==============================================================================
+
+☑  Copy only the necessary library files
+☑  Generate peripheral initialization as pair of .c/.h files
+☑  Keep User Code when re-generating (DO NOT overwrite manually edited files)
+☐  Delete previously generated files when not re-generated (leave UNCHECKED)
+
+Generated file structure CubeMX will produce:
+  Core/Src/main.c              ← REPLACE with our main.c
+  Core/Src/stm32f4xx_hal_msp.c ← KEEP (MSP init — HAL GPIO/UART/I2C alt-func)
+  Core/Src/stm32f4xx_it.c      ← KEEP (IRQ handlers — do not overwrite)
+  Core/Src/system_stm32f4xx.c  ← KEEP (SystemInit)
+  Core/Inc/main.h              ← KEEP (HAL handle declarations)
+  Core/Inc/stm32f4xx_hal_conf.h← KEEP (HAL module enable macros)
+  Core/Inc/stm32f4xx_it.h      ← KEEP
+
+  NEVER EDIT (auto-generated):
+    stm32f4xx_hal_msp.c
+    stm32f4xx_it.c
+    system_stm32f4xx.c
+    Drivers/  (entire directory)
+
+  MANUALLY CREATE (NOT generated by CubeMX):
+    Core/Src/MPU6050.c
+    Core/Src/ComplementaryFilter.c
+    Core/Src/FeatureExtractor.c
+    Core/Src/NeuralNetwork.c
+    Core/Src/Serialization.c
+    Core/Src/FederatedClient.c
+    Core/Src/Utils.c
+    Core/Inc/*.h  (all custom headers)
+
+==============================================================================
+STEP 13: OPTIMIZATION SETTINGS
+==============================================================================
+
+In Project Manager → Advanced Settings:
+  Optimization: -O2  (speed-optimized, enables FPU FMAC autovectorization)
+
+For debug builds, change to -Og in the Makefile/CMakeLists.txt directly.
+
+==============================================================================
+STEP 14: MEMORY MAP VERIFICATION
+==============================================================================
+
+After building, verify with: arm-none-eabi-size --format=berkeley build/FedVibroSense.elf
+
+Expected approximate usage:
+  .text  (Flash):  ~45–60 KB   (HAL + custom code + libm stubs)
+  .data  (RAM):    ~1 KB
+  .bss   (RAM):    ~90–100 KB  (NN weights 32 KB + FL buf 20 KB + ring buf 3 KB + ser buf 32 KB)
+
+STM32F405 has 192 KB total SRAM (128 KB SRAM1 + 64 KB CCM).
+Main SRAM1 (128 KB) is sufficient for all static buffers.
+
+If .bss exceeds 128 KB, move NN_Handle_t to CCM:
+  Add to main.c:  __attribute__((section(".ccmram"))) static NN_Handle_t s_nn;
+  The CCM section in the linker script handles this placement.
