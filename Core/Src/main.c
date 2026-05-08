@@ -10,7 +10,7 @@
  *   Debug:  UART2 (PA2=TX, PA3=RX) @ 115200 baud
  *   FL:     UART1 (PA9=TX, PA10=RX) @ 921600 baud
  *   Label:  PC13 button (active low) cycles class: normal→imbalance→looseness
- *   Status: PD12/13/14 LEDs = class indicator, PD15 = training indicator
+ *   Status: PA4/5/6 LEDs = class indicator, PA7 = training indicator
  *
  * Main loop execution (100 Hz):
  *
@@ -70,21 +70,12 @@
 #include <stdio.h>
 #include <string.h>
 
-/* =========================================================================
- * HAL PERIPHERAL HANDLES
- * These are declared here and extern'd in Utils.h and other modules.
- * CubeMX generates declarations in main.h; we define them here.
- * ========================================================================= */
 
 I2C_HandleTypeDef  hi2c1;     /**< MPU-6050 I2C bus */
 UART_HandleTypeDef huart1;    /**< FL communication UART (921600 baud) */
 UART_HandleTypeDef huart2;    /**< Debug UART (115200 baud) */
 TIM_HandleTypeDef  htim2;     /**< Free-running microsecond timer (32-bit) */
 TIM_HandleTypeDef  htim3;     /**< 100 Hz sampling timer (period interrupt) */
-
-/* =========================================================================
- * APPLICATION-LEVEL OBJECTS (static — no heap)
- * ========================================================================= */
 
 /** IMU driver handle */
 static MPU6050_Handle_t   s_mpu;
@@ -122,10 +113,6 @@ static CF_Output_t        s_cf_out;
 /** Feature vector (500 floats, ~2 KB on stack is too large — static) */
 static float              s_feature_vec[FEATURE_VECTOR_SIZE];
 
-/* =========================================================================
- * TIMING FLAGS — set by timer ISR, consumed by main loop
- * ========================================================================= */
-
 /** Set by TIM3 ISR at 100 Hz — signals time to read IMU */
 volatile uint8_t g_sample_flag = 0U;
 
@@ -133,15 +120,7 @@ volatile uint8_t g_sample_flag = 0U;
 volatile uint8_t g_uart_rx_byte = 0U;
 volatile uint8_t g_uart_rx_ready = 0U;
 
-/* =========================================================================
- * CURRENT LABEL — operator-controlled
- * ========================================================================= */
-
 static uint8_t s_current_label = CLASS_NORMAL;
-
-/* =========================================================================
- * FUNCTION PROTOTYPES
- * ========================================================================= */
 
 static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
@@ -155,9 +134,6 @@ static void App_Init(void);
 static void App_HandleUARTCommand(uint8_t cmd);
 static void App_UpdateLEDs(uint8_t class_idx, uint8_t training);
 
-/* =========================================================================
- * MAIN ENTRY POINT
- * ========================================================================= */
 
 int main(void)
 {
@@ -187,14 +163,14 @@ int main(void)
             FL_LOCAL_EPOCHS);
     Utils_PrintMemoryStats();
 
-    /* ===================================================================
+    /*
      * MAIN LOOP
      *
      * Structure:
      *   [100 Hz]  IMU read → CF update → ring push → (optional) inference
      *   [1 Hz]    Feature vector build → FL client tick
      *   [async]   UART command handling for labels and FL trigger
-     * =================================================================== */
+    */
 
     uint32_t window_count       = 0UL;  /* Number of complete 1-s windows */
     uint32_t last_window_ms     = 0UL;  /* Timestamp of last feature build */
@@ -303,10 +279,6 @@ int main(void)
     return 0;
 }
 
-/* =========================================================================
- * APPLICATION INITIALIZATION
- * ========================================================================= */
-
 static void App_Init(void)
 {
     /* Start microsecond timer */
@@ -352,7 +324,7 @@ static void App_Init(void)
     LOG_INF("App_Init complete. Waiting for 1 s of IMU data...");
 }
 
-/* =========================================================================
+/* 
  * UART COMMAND HANDLER
  *
  * Commands (single ASCII byte via debug UART):
@@ -363,7 +335,7 @@ static void App_Init(void)
  *   'r' — reset FL client
  *   's' — print status
  *   'w' — print NN weight statistics
- * ========================================================================= */
+ */
 
 static void App_HandleUARTCommand(uint8_t cmd)
 {
@@ -398,27 +370,23 @@ static void App_HandleUARTCommand(uint8_t cmd)
     }
 }
 
-/* =========================================================================
+/* 
  * LED STATUS OUTPUT
  *
- * STM32F405 Discovery LEDs on PD12/13/14/15:
- *   PD12 Green  = CLASS_NORMAL
- *   PD13 Orange = CLASS_IMBALANCE
- *   PD14 Red    = CLASS_LOOSENESS
- *   PD15 Blue   = Training/FL active
- * ========================================================================= */
+ * STM32F405 Discovery LEDs on PA4/5/6/7:
+ *   PA4 Green  = CLASS_NORMAL
+ *   PA5 Orange = CLASS_IMBALANCE
+ *   PA6 Red    = CLASS_LOOSENESS
+ *   PA7 Blue   = Training/FL active
+ */
 
 static void App_UpdateLEDs(uint8_t class_idx, uint8_t training)
 {
-    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, (class_idx == CLASS_NORMAL)    ? GPIO_PIN_SET : GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, (class_idx == CLASS_IMBALANCE) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, (class_idx == CLASS_LOOSENESS) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, training ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, (class_idx == CLASS_NORMAL)    ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, (class_idx == CLASS_IMBALANCE) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, (class_idx == CLASS_LOOSENESS) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, training ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
-
-/* =========================================================================
- * HAL CALLBACKS
- * ========================================================================= */
 
 /**
  * @brief  TIM3 Period Elapsed callback — fires at 100 Hz.
@@ -453,13 +421,13 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     }
 }
 
-/* =========================================================================
+/* 
  * PERIPHERAL INITIALIZATION FUNCTIONS
  *
  * These would normally be auto-generated by STM32CubeMX.
  * They are provided here for completeness and terminal builds.
  * In a CubeMX project, delete these and rely on the generated versions.
- * ========================================================================= */
+ *  */
 
 /**
  * @brief  System Clock Configuration.
