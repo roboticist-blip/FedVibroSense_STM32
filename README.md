@@ -1,4 +1,4 @@
-# FedVibroSense — STM32F405 Federated Learning Vibration Client
+# SensiNerveX — STM32F405 Federated Learning Vibration Client
 
 [![Platform](https://img.shields.io/badge/Platform-STM32F405RGT6-blue)](https://www.st.com/en/microcontrollers-microprocessors/stm32f405rg.html)
 [![Architecture](https://img.shields.io/badge/Architecture-ARM%20Cortex--M4F-green)](https://developer.arm.com/Processors/Cortex-M4)
